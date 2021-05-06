@@ -8,6 +8,7 @@ import (
 	"github.com/hyperledger/fabric-protos-go/peer"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/protos/peer"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/tools/go/analysis/passes/nilfunc"
 )
 
@@ -251,3 +252,36 @@ func assetExchange(stub shim.ChaincodeStubInterface, args []string) peer.Respons
 
 	return shim.Success(nil)
 }
+
+// 基于id查询用户
+func queryUser(stub shim.ChaincodeStubInterface, args []string) peer.Response {
+	if len(args) != 1 {
+		return shim.Error("Error number of args")
+	}
+	userId := args[0]
+	if userId == "" {
+		return shim.Error("Invalid args")
+	}
+	userBytes, err := stub.GetState(constructUserKey(userId))
+	if err != nil || len(userBytes) == 0 {
+		return shim.Error("user not found")
+	}
+	return shim.Success(userBytes)
+}
+
+// 基于assetId查询资产信息
+func queryAsset(stub shim.ChaincodeStubInterface, args []string) peer.Response {
+	if len(args) != 1 {
+		return shim.Error("Error number of args")
+	}
+	assetId := args[0]
+	if assetId == "" {
+		return shim.Error("Invalid args")
+	}
+	assetBytes, err := stub.GetState(constructAssetKey(assetId))
+	if err != nil || len(assetBytes) == 0 {
+		return shim.Error("asset not found")
+	}
+	return shim.Success(assetBytes)
+}
+
