@@ -6,10 +6,11 @@ import (
 
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-protos-go/peer"
-	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/protos/peer"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/tools/go/analysis/passes/nilfunc"
+	// "github.com/hyperledger/fabric/core/chaincode/shim"
+	// "github.com/hyperledger/fabric/protos/peer"
+	// "github.com/stretchr/testify/require"
+	// "golang.org/x/text/cases"
+	// "golang.org/x/tools/go/analysis/passes/nilfunc"
 )
 
 type User struct {
@@ -189,7 +190,7 @@ func assetExchange(stub shim.ChaincodeStubInterface, args []string) peer.Respons
 			break
 		}
 	}
-	if assetid_exist == false {
+	if !assetid_exist{
 		return shim.Error("asset owner doesn't have the aim asset")
 	}
 
@@ -285,3 +286,99 @@ func queryAsset(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 	return shim.Success(assetBytes)
 }
 
+// 资产交易记录查询
+func queryAssetHistory(stub shim.ChaincodeStubInterface, args []string) peer.Response {
+	if len(args) != 2 && len(args) != 1 {
+		return shim.Error("Error number of args")
+	}
+	assetId := args[0]
+	queryType := "all"
+	if len(args) == 2 {
+		queryType = args[1]
+	}
+
+	if queryType != "all" && queryType != "enroll" && queryType != "exchange" {
+		return shim.Error(fmt.Sprintf("queryType unknown %s", queryType))
+	}
+	assetBytes, err := stub.GetState(constructAssetKey(assetId))
+	if err != nil || len(assetBytes) == 0 {
+		return shim.Error("asset not found")
+	}
+
+	keys := make([]string, 0)
+	keys = append(keys, assetId)
+	switch queryType {
+	case "enroll":
+		keys = append(keys, originOwner)
+	case "exchange", "all":
+	default:
+		return shim.Error(fmt.Sprintf("unsupport queryType: %s", queryType))
+	}
+	result, err := stub.GetStateByPartialCompositeKey("history", keys)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("query history error: %s", err))
+	}
+	defer result.Close()
+
+	histories := make([]*AssetHistory, 0)
+	for result.HasNext() {
+		historyVal, err := result.Next()
+		if err != nil {
+			return shim.Error(fmt.Sprintf("query error: %s", err))
+		}
+
+		history := new(AssetHistory)
+		if err := json.Unmarshal(historyVal.GetValue(), history); err != nil {
+			return shim.Error(fmt.Sprintf("unmarshal error: %s", err))
+		}
+
+		// 过滤掉不是资产转让的记录
+		if queryType == "exchange" && history.OriginOwnerID == originOwner {
+			continue
+		}
+		
+		histories = append(histories, history)
+	}
+
+	historiesBytes, err := json.Marshal(histories)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("marshal error: %s", err))
+	}
+
+	return shim.Success(historiesBytes)
+}
+
+type AssetExchangeChainCode struct{
+
+}
+
+func (t *AssetExchangeChainCode) Init(stub shim.ChaincodeStubInterface) peer.Response {
+	return shim.Success(nil)
+}
+
+func (t *AssetExchangeChainCode) Invoke(stub shim.ChaincodeStubInterface) peer.Response {
+	functionName, args := stub.GetFunctionAndParameters()
+	switch functionName {
+	case "userRegister":
+		return userRegister(stub, args)
+	case "assetEnroll":
+		return assetEnroll(stub, args)
+	case "assetExchange":
+		return assetExchange(stub, args)
+	case "queryUser":
+		return queryUser(stub, args)
+	case "queryAsset":
+		return queryAsset(stub, args)
+	case "queryAssetHistory":
+		return queryAssetHistory(stub, args)
+	default:
+		return shim.Error(fmt.Sprintf("unsupported function: %s", functionName))
+	}
+}
+
+func main() {
+	err := shim.Start(new(AssetExchangeChainCode))
+	if err != nil {
+		fmt.Printf("Error starting AssetExchange chaincode: %s", err)
+	}
+}
