@@ -147,3 +147,107 @@ func assetEnroll(stub shim.ChaincodeStubInterface, args []string) peer.Response 
 	}
 	return shim.Success(historyBytes)
 }
+
+// 实现资产转让
+func assetExchange(stub shim.ChaincodeStubInterface, args []string) peer.Response {
+	if len(args) != 3 {
+		return shim.Error("Error number of args")
+	}
+
+	ownerId := args[0]
+	assetId := args[1]
+	currentOwnerId := args[2]
+
+	if ownerId == "" || assetId == "" || currentOwnerId == "" {
+		return shim.Error("Invalid args")
+	}
+	// 验证数据是否存在
+	originOwnerBytes, err := stub.GetState(constructUserKey(ownerId))
+	if err != nil || len(originOwnerBytes) == 0 {
+		return shim.Error("user not found")
+	}
+	currentOwnerBytes, err := stub.GetState(constructUserKey(currentOwnerId))
+	if err != nil || len(currentOwnerBytes) == 0 {
+		return shim.Error("user not found")
+	}
+	assetBytes, err := stub.GetState(constructAssetKey(assetId))
+	if err != nil || len(assetBytes) == 0 {
+		return shim.Error("asset not found")
+	}
+
+	// 检验卖家是否存在指定资产
+	originOwner := new(User)
+	// 反序列化user
+	if err := json.Unmarshal(originOwnerBytes, originOwner); err != nil {
+		return shim.Error(fmt.Sprintf("unmarshal user error: %s", err))
+	}
+	assetid_exist := false
+	for _, assetid := range originOwner.Assets {
+		if assetid == assetId {
+			assetid_exist = true
+			break
+		}
+	}
+	if assetid_exist == false {
+		return shim.Error("asset owner doesn't have the aim asset")
+	}
+
+	// 将结果写入
+	totolAssetId := make([]string, 0)
+	for _, assetid := range originOwner.Assets {
+		if assetid == assetId {
+			continue
+		}
+		totolAssetId = append(totolAssetId, assetid)
+	}
+	originOwner.Assets = totolAssetId
+
+	originOwnerBytes, err = json.Marshal(originOwner)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("marshal user error: %s", err))
+	}
+	if err := stub.PutState(constructUserKey(ownerId), originOwnerBytes); err != nil {
+		return shim.Error(fmt.Sprintf("update user error: %s", err))
+	}
+
+	//买家添加资产id
+	currentOwner := new(User)
+	//反序列化user
+	if err := json.Unmarshal(currentOwnerBytes, currentOwner); err != nil {
+		return shim.Error(fmt.Sprintf("unmarshal user error: %s", err))
+	}
+	currentOwner.Assets = append(currentOwner.Assets, assetId)
+
+	currentOwnerBytes, err = json.Marshal(currentOwner)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("marshal user error: %s", err))
+	}
+	if err := stub.PutState(constructUserKey(currentOwnerId), currentOwnerBytes); err != nil {
+		return shim.Error(fmt.Sprintf("update user error: %s", err))
+	}
+
+	//插入资产变更记录
+	history := &AssetHistory{
+		AssetID: assetId,
+		OriginOwnerID: ownerId,
+		CurrentOwnerID: currentOwnerId,
+	}
+	historyBytes, err := json.Marshal(history)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("marshal asset history error: %s", err))
+	}
+	
+	historyKey, err := stub.CreateCompositeKey("history", []string{
+		assetId,
+		ownerId,
+		currentOwnerId,
+	})
+	if err != nil {
+		return shim.Error(fmt.Sprintf("create key error: %s", err))
+	}
+	if err := stub.PutState(historyKey, historyBytes); err != nil {
+		return shim.Error(fmt.Sprintf("save asset history error: %s", err))
+	}
+
+	return shim.Success(nil)
+}
